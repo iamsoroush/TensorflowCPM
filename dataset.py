@@ -20,7 +20,7 @@ class MPII:
         self.path = os.path.join(path, 'mpii')
         self.images_path = os.path.join(self.path, 'images')
         self.belief_maps_path = os.path.join(self.path, 'believes')
-        self.joints_path = os.path.join(path, 'data.json')
+        self.joints_path = os.path.join(self.path, 'data.json')
         self.test_size = test_size
         self.variance = heatmap_variance
         self.n_parts = n_parts
