@@ -160,7 +160,7 @@ class MPII:
         self.image_paths = np.array(img_paths)
         self.joints_list = np.array(joints_list)
         img_names = [i.split('/')[-1].split('.')[0] for i in img_paths]
-        self.img_names = np.array(img_names)
+        self.img_names = img_names
 
     def _generate_tfrecords(self):
 
