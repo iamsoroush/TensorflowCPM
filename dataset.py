@@ -186,7 +186,7 @@ class MPII:
 
         img_names = self.img_names
         tfrecord_paths.sort(key=sort_func)
-        self.tfrecord_paths = tfrecord_paths
+        self.tfrecord_paths = np.array(tfrecord_paths)
 
     @staticmethod
     def _generate_joint_pos(row, joint):
