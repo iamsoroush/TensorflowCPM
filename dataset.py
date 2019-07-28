@@ -37,6 +37,7 @@ class MPII:
 
         Returns paths to images and belief maps for train and test.
         """
+
         self._download()
         self._save_joints()
         joints_df = pd.read_json(self.joints_path, lines=True)
@@ -156,10 +157,10 @@ class MPII:
                     joints[int(k)].append(v)
             joints_list.append(joints)
             img_paths.append(os.path.join(self.images_path, gn))
-        self.image_paths = img_paths
-        self.joints_list = joints_list
+        self.image_paths = np.array(img_paths)
+        self.joints_list = np.array(joints_list)
         img_names = [i.split('/')[-1].split('.')[0] for i in img_paths]
-        self.img_names = img_names
+        self.img_names = np.array(img_names)
 
     def _generate_tfrecords(self):
 
