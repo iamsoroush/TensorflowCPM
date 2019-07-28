@@ -105,7 +105,7 @@ class MPII:
                 head_y2s = anno['annorect']['y2'][0]
                 for annopoint, head_x1, head_y1, head_x2, head_y2 in zip(
                         annopoints, head_x1s, head_y1s, head_x2s, head_y2s):
-                    if annopoint:
+                    if annopoint != []:
                         head_rect = [float(head_x1[0, 0]),
                                      float(head_y1[0, 0]),
                                      float(head_x2[0, 0]),
