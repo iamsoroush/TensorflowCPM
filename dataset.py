@@ -172,7 +172,7 @@ class MPII:
         if os.path.exists(self.belief_maps_path):
             if len(os.listdir(self.belief_maps_path)) == len(self.image_paths):
                 print('tfrecords already generated.')
-                tfrecord_paths = os.listdir(self.belief_maps_path)
+                tfrecord_paths = [os.path.join(self.belief_maps_path, i) for i in os.listdir(self.belief_maps_path)]
         else:
             os.mkdir(self.belief_maps_path)
             for i in tqdm(range(len(self.image_paths))):
