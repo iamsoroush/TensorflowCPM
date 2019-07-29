@@ -10,29 +10,29 @@ from scipy.io import loadmat
 import numpy as np
 import pandas as pd
 
+import cv2
+
 import tensorflow as tf
 
 
 class MPII:
 
     def __init__(self, path='pose_dataset', test_size=0.1,
-                 heatmap_variance=3, n_parts=16, batch_size=32):
+                 heatmap_variance=3, n_parts=16, batch_size=32,
+                 target_size=(512, 512)):
         self.path = os.path.join(path, 'mpii')
         self.images_path = os.path.join(self.path, 'images')
         self.belief_maps_path = os.path.join(self.path, 'believes')
         self.joints_path = os.path.join(self.path, 'data.json')
+        self.train_df_path = os.path.join(self.path, 'train_paths.csv')
+        self.test_df_path = os.path.join(self.path, 'test_paths.csv')
         self.test_size = test_size
         self.variance = heatmap_variance
         self.n_parts = n_parts
         self.batch_size = batch_size
-        self.image_paths = None
-        self.joints_list = None
-        self.tfrecord_paths = None
-        self.img_names = None
-        self.train_ind = None
-        self.test_ind = None
+        self.target_size = target_size
 
-    def generate_dataset(self):
+    def generate_dataset(self, src_tfr_path=None):
         """Generates and prepares MPII dataset.
 
         Returns paths to images and belief maps for train and test.
@@ -41,21 +41,41 @@ class MPII:
         self._download()
         self._save_joints()
         joints_df = pd.read_json(self.joints_path, lines=True)
-        self._generate_img_paths_joints(joints_df)
-        self._generate_tfrecords()
-        self._train_test_split()
-        train_img = self.image_paths[self.train_ind]
-        train_tfrecord = self.tfrecord_paths[self.train_ind]
-        test_img = self.image_paths[self.test_ind]
-        test_tfrecord = self.tfrecord_paths[self.test_ind]
+        if os.path.isfile(self.train_df_path) and os.path.isfile(self.test_df_path):
+            train_img, train_tfrecord, test_img, test_tfrecord = self._load_train_test_paths()
+        else:
+            image_paths, joints_list, image_names = self._generate_img_paths_joints(joints_df)
+            if src_tfr_path is None:
+                tfrecord_paths = self._generate_tfrecords(image_paths, joints_list, image_names)
+            else:
+                tfrecord_paths = self._copy_tfrecords(src_tfr_path, image_names)
+            train_img, train_tfrecord, test_img, test_tfrecord = self._train_test_split(image_paths, tfrecord_paths)
 
         train_ds = self.create_dataset(train_img, train_tfrecord)
         test_ds = self.create_dataset(test_img, test_tfrecord)
         return train_ds, test_ds
 
+    def _load_train_test_paths(self):
+        print('Loading train and test image and tfrecord paths ...')
+        train_df = pd.read_csv(self.train_df_path)
+        test_df = pd.read_csv(self.test_df_path)
+        return train_df['img_path'], train_df['tfrecord_path'], test_df['img_path'], test_df['tfrecord_path']
+
+    def _copy_tfrecords(self, src_path, image_names):
+
+        def sort_func(elem):
+            elem_fn = elem.split('/')[-1].split('.')[0]
+            return image_names.index(elem_fn)
+
+        print('Copying tfrecords from {} to {} ...'.format(src_path, self.belief_maps_path))
+        shutil.copytree(src_path, self.belief_maps_path)
+        tfrecord_paths = [os.path.join(self.belief_maps_path, i) for i in os.listdir(self.belief_maps_path)]
+        tfrecord_paths.sort(key=sort_func)
+        return np.array(tfrecord_paths)
+
     def _download(self):
         if os.path.isdir(self.path):
-            print('MPII dataset already exists.')
+            print('MPII dataset has been downloaded and already exists.')
             return
 
         file_name1 = 'mpii_human_pose_v1_u12_1.tar.gz'
@@ -81,11 +101,12 @@ class MPII:
         os.remove(file_name2)
 
         shutil.move('images', self.path)
-        print('Done. You can find the MPII dataset at ', self.path)
+        print('MPII downloaded. You can find the MPII dataset at ', self.path)
 
     def _save_joints(self):
         joint_data_fn = self.joints_path
         if os.path.exists(joint_data_fn):
+            print('joints data exists.')
             return
         mat = loadmat(os.path.join(self.path, 'mpii_human_pose_v1_u12_1.mat'))
 
@@ -140,8 +161,10 @@ class MPII:
                             }
 
                             print(json.dumps(data), file=fp)
+        print('joints data generated and saved to ', self.joints_path)
 
     def _generate_img_paths_joints(self, joints_df):
+        print('Generating image paths and joints list ...')
         g = joints_df.groupby('filename')['joint_pos']
 
         img_paths = list()
@@ -157,36 +180,37 @@ class MPII:
                     joints[int(k)].append(v)
             joints_list.append(joints)
             img_paths.append(os.path.join(self.images_path, gn))
-        self.image_paths = np.array(img_paths)
-        self.joints_list = np.array(joints_list)
         img_names = [i.split('/')[-1].split('.')[0] for i in img_paths]
-        self.img_names = img_names
+        return np.array(img_paths), np.array(joints_list), img_names
 
-    def _generate_tfrecords(self):
+    def _generate_tfrecords(self, image_paths, joints_list, image_names):
 
         def sort_func(elem):
             elem_fn = elem.split('/')[-1].split('.')[0]
-            return img_names.index(elem_fn)
+            return image_names.index(elem_fn)
 
+        print('Generating tfrecords ...')
         tfrecord_paths = list()
         if os.path.exists(self.belief_maps_path):
-            if len(os.listdir(self.belief_maps_path)) == len(self.image_paths):
-                print('tfrecords already generated.')
+            if len(os.listdir(self.belief_maps_path)) == len(image_paths):
+                print('tfrecords already exist.')
                 tfrecord_paths = [os.path.join(self.belief_maps_path, i) for i in os.listdir(self.belief_maps_path)]
+                tfrecord_paths.sort(key=sort_func)
+                return np.array(tfrecord_paths)
         else:
             os.mkdir(self.belief_maps_path)
-            for i in tqdm(range(len(self.image_paths))):
-                img_path = self.image_paths[i]
-                joints = self.joints_list[i]
-                img = cv2.imread(img_path)
-                h, w, _ = img.shape
-                belief_map = self._generate_believes(h, w, joints)
-                st_path = self._save_to_sparse_tfrecord(img_path, h, w, belief_map)
-                tfrecord_paths.append(st_path)
 
-        img_names = self.img_names
+        for i in tqdm(range(len(image_paths))):
+            img_path = image_paths[i]
+            joints = joints_list[i]
+            img = cv2.imread(img_path)
+            h, w, _ = img.shape
+            belief_map = self._generate_believes(h, w, joints)
+            st_path = self._save_to_sparse_tfrecord(img_path, h, w, belief_map)
+            tfrecord_paths.append(st_path)
+
         tfrecord_paths.sort(key=sort_func)
-        self.tfrecord_paths = np.array(tfrecord_paths)
+        return np.array(tfrecord_paths)
 
     @staticmethod
     def _generate_joint_pos(row, joint):
@@ -195,14 +219,27 @@ class MPII:
         else:
             return np.array(row['joint_pos'][str(joint)])
 
-    def _train_test_split(self):
-        n_instances = len(self.image_paths)
+    def _train_test_split(self, image_paths, tfrecord_paths):
+        print('Splitting the data to train-test subsets ...')
+        n_instances = len(image_paths)
         indices = np.arange(n_instances)
         np.random.shuffle(indices)
         n_test = int(n_instances * self.test_size)
         n_train = n_instances - n_test
-        self.train_ind = indices[:n_train]
-        self.test_ind = indices[n_train:]
+        train_ind = indices[:n_train]
+        test_ind = indices[n_train:]
+
+        train_img = image_paths[train_ind]
+        train_tfrecord = tfrecord_paths[train_ind]
+        test_img = image_paths[test_ind]
+        test_tfrecord = tfrecord_paths[test_ind]
+
+        train_df = pd.DataFrame(data=[train_img, train_tfrecord], columns=['img_path', 'tfrecord_path'])
+        test_df = pd.DataFrame(data=[test_img, test_tfrecord], columns=['img_path', 'tfrecord_path'])
+
+        train_df.to_csv(self.train_df_path)
+        test_df.to_csv(self.test_df_path)
+        return train_img, train_tfrecord, test_img, test_tfrecord
 
     @staticmethod
     def _generate_gaussian_img(gaussian, img_height, img_width, c_x, c_y, variance):
@@ -264,6 +301,7 @@ class MPII:
         def preprocess_image(image):
             image = tf.image.decode_jpeg(image, channels=3)
             image /= 255  # normalize to [0,1] range
+            image = tf.image.resize_with_pad(image, target_h, target_w)
             return image
 
         def parse_bm(tfr):
@@ -281,13 +319,17 @@ class MPII:
 
             indices = tf.stack([ind0, ind1, ind2], axis=1)
             st = tf.SparseTensor(values=values, indices=indices, dense_shape=shape)
-            return tf.sparse.to_dense(st)
+            belief_maps = tf.sparse.to_dense(st)
+
+            resized = tf.image.resize_with_pad(belief_maps, target_h, target_w)
+            return resized
 
         def load_data(img_path, tfr):
             img = load_and_preprocess_image(img_path)
             belief_maps = parse_bm(tfr)
             return img, belief_maps
 
+        target_h, target_w = self.target_size
         img_ds = tf.data.Dataset.from_tensor_slices(img_paths)
         bm_ds = tf.data.TFRecordDataset(tfrecord_paths)
         zipped = tf.data.Dataset.zip((img_ds, bm_ds))
