@@ -67,8 +67,11 @@ class MPII:
             elem_fn = elem.split('/')[-1].split('.')[0]
             return image_names.index(elem_fn)
 
-        print('Copying tfrecords from {} to {} ...'.format(src_path, self.belief_maps_path))
-        shutil.copytree(src_path, self.belief_maps_path)
+        if os.path.exists(self.belief_maps_path):
+            print('Belief maps already exists.')
+        else:
+            print('Copying tfrecords from {} to {} ...'.format(src_path, self.belief_maps_path))
+            shutil.copytree(src_path, self.belief_maps_path)
         tfrecord_paths = [os.path.join(self.belief_maps_path, i) for i in os.listdir(self.belief_maps_path)]
         tfrecord_paths.sort(key=sort_func)
         return np.array(tfrecord_paths)
@@ -234,8 +237,8 @@ class MPII:
         test_img = image_paths[test_ind]
         test_tfrecord = tfrecord_paths[test_ind]
 
-        train_df = pd.DataFrame(data=[train_img, train_tfrecord], columns=['img_path', 'tfrecord_path'])
-        test_df = pd.DataFrame(data=[test_img, test_tfrecord], columns=['img_path', 'tfrecord_path'])
+        train_df = pd.DataFrame({'img_path': train_img, 'tfrecord_path': train_tfrecord})
+        test_df = pd.DataFrame({'img_path': test_img, 'tfrecord_path': test_tfrecord})
 
         train_df.to_csv(self.train_df_path)
         test_df.to_csv(self.test_df_path)
