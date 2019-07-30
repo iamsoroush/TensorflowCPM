@@ -13,13 +13,15 @@ import pandas as pd
 import cv2
 
 import tensorflow as tf
+if not tf.__version__.startswith('2'):
+    raise ImportError('Install tensorflow-gpu==2.0beta')
 
 
 class MPII:
 
     def __init__(self, path='pose_dataset', test_size=0.1,
                  heatmap_variance=3, n_parts=16, batch_size=32,
-                 target_size=(512, 512)):
+                 target_size=(358, 358)):
         self.path = os.path.join(path, 'mpii')
         self.images_path = os.path.join(self.path, 'images')
         self.belief_maps_path = os.path.join(self.path, 'believes')
@@ -31,12 +33,11 @@ class MPII:
         self.n_parts = n_parts
         self.batch_size = batch_size
         self.target_size = target_size
+        self.n_train = None
+        self.n_test = None
 
     def generate_dataset(self, src_tfr_path=None):
-        """Generates and prepares MPII dataset.
-
-        Returns paths to images and belief maps for train and test.
-        """
+        """Generates and prepares MPII dataset."""
 
         self._download()
         self._save_joints()
@@ -50,6 +51,9 @@ class MPII:
             else:
                 tfrecord_paths = self._copy_tfrecords(src_tfr_path, image_names)
             train_img, train_tfrecord, test_img, test_tfrecord = self._train_test_split(image_paths, tfrecord_paths)
+
+        self.n_train = len(train_img)
+        self.n_test = len(test_img)
 
         train_ds = self.create_dataset(train_img, train_tfrecord)
         test_ds = self.create_dataset(test_img, test_tfrecord)
@@ -162,7 +166,6 @@ class MPII:
                                 'is_visible': vis,
                                 'joint_pos': joint_pos
                             }
-
                             print(json.dumps(data), file=fp)
         print('joints data generated and saved to ', self.joints_path)
 
