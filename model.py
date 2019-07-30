@@ -59,12 +59,12 @@ class CPM:
         y = self._conv2d(input_image, filters=64, kernel_size=(3, 3))
         y = self._conv2d(y, filters=64, kernel_size=(3, 3))
         x = self._add_skip_connection(input_image, y)
-        x = tfkl.MaxPooling2D((2, 2), strides=2, padding='same')(x)
+        x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
 
         y = self._conv2d(x, filters=128, kernel_size=(3, 3))
         y = self._conv2d(y, filters=128, kernel_size=(3, 3))
         x = self._add_skip_connection(x, y)
-        x = tfkl.MaxPooling2D((2, 2), strides=2, padding='same')(x)
+        x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
 
         y = self._conv2d(x, filters=256, kernel_size=(3, 3))
         y = self._conv2d(y, filters=256, kernel_size=(3, 3))
@@ -72,7 +72,7 @@ class CPM:
         y = self._conv2d(x, filters=256, kernel_size=(3, 3))
         y = self._conv2d(y, filters=256, kernel_size=(3, 3))
         x = self._add_skip_connection(x, y)
-        x = tfkl.MaxPooling2D((2, 2), strides=2, padding='same')(x)
+        x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
 
         y = self._conv2d(x, filters=512, kernel_size=(3, 3))
         y = self._conv2d(y, filters=512, kernel_size=(3, 3))
