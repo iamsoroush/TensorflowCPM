@@ -61,7 +61,8 @@ class MPII:
         print('Loading train and test image and tfrecord paths ...')
         train_df = pd.read_csv(self.train_df_path)
         test_df = pd.read_csv(self.test_df_path)
-        return train_df['img_path'], train_df['tfrecord_path'], test_df['img_path'], test_df['tfrecord_path']
+        return train_df['img_path'].values, train_df['tfrecord_path'].values,\
+               test_df['img_path'].values, test_df['tfrecord_path'].values
 
     def _copy_tfrecords(self, src_path, image_names):
 
