@@ -24,7 +24,8 @@ class CPM:
         return model
 
     def _cpm_first_stage(self, features):
-        x = self._conv2d(features, filters=512, kernel_size=(1, 1))
+        # x = self._conv2d(features, filters=512, kernel_size=(1, 1))
+        x = self._conv2d(features, filters=128, kernel_size=(1, 1))
         x = tfkl.Conv2D(self.n_parts, (1, 1), padding='same', name='first_stage_heatmap')(x)
         return x
 
@@ -74,8 +75,10 @@ class CPM:
         x = self._add_skip_connection(x, y)
         x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
 
-        y = self._conv2d(x, filters=512, kernel_size=(3, 3))
-        y = self._conv2d(y, filters=512, kernel_size=(3, 3))
+        # y = self._conv2d(x, filters=512, kernel_size=(3, 3))
+        # y = self._conv2d(y, filters=512, kernel_size=(3, 3))
+        y = self._conv2d(x, filters=256, kernel_size=(3, 3))
+        y = self._conv2d(y, filters=256, kernel_size=(3, 3))
         x = self._add_skip_connection(x, y)
         y = self._conv2d(x, filters=256, kernel_size=(3, 3))
         y = self._conv2d(y, filters=256, kernel_size=(3, 3))
