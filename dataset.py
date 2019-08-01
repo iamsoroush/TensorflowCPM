@@ -306,7 +306,7 @@ class MPII:
         def preprocess_image(image):
             image = tf.image.decode_jpeg(image, channels=3)
             image /= 255  # normalize to [0,1] range
-            image = tf.image.resize_image_with_pad(image, target_h, target_w)
+            image = tf.image.resize_with_pad(image, target_h, target_w)
             return image
 
         def parse_bm(tfr):
@@ -326,7 +326,7 @@ class MPII:
             st = tf.SparseTensor(values=values, indices=indices, dense_shape=shape)
             belief_maps = tf.sparse.to_dense(st)
 
-            resized = tf.image.resize_image_with_pad(belief_maps, target_h, target_w)
+            resized = tf.image.resize_with_pad(belief_maps, target_h, target_w)
             return resized
 
         def load_data(img_path, tfr):
