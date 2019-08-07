@@ -25,17 +25,14 @@ class CPM:
 
     def _cpm_first_stage(self, features):
         # x = self._conv2d(features, filters=512, kernel_size=(1, 1))
-        x = self._conv2d(features, filters=64, kernel_size=(1, 1))
+        x = self._conv2d(features, filters=256, kernel_size=(3, 3))
+        x = self._conv2d(x, filters=256, kernel_size=(3, 3))
+        x = self._conv2d(x, filters=128, kernel_size=(1, 1))
         x = tfkl.Conv2D(self.n_parts, (1, 1), padding='same', name='first_stage_heatmap')(x)
         return x
 
     def _cpm_middle_stage(self, features, former_believes, prefix):
         x = tfkl.concatenate([former_believes, features], axis=-1)
-        y = self._conv2d(x, filters=128, kernel_size=(2, 2))
-        y = self._conv2d(y, filters=128, kernel_size=(2, 2))
-        y = self._conv2d(y, filters=128, kernel_size=(2, 2))
-        x = self._add_skip_connection(x, y)
-
         y = self._conv2d(x, filters=128, kernel_size=(2, 2))
         y = self._conv2d(y, filters=128, kernel_size=(2, 2))
         y = self._conv2d(y, filters=128, kernel_size=(2, 2))
@@ -57,37 +54,24 @@ class CPM:
         return belief_maps
 
     def _feature_extractor(self, input_image):
-        y = self._conv2d(input_image, filters=32, kernel_size=(3, 3))
-        y = self._conv2d(y, filters=32, kernel_size=(3, 3))
+        y = self._conv2d(input_image, filters=64, kernel_size=(3, 3))
+        y = self._conv2d(y, filters=64, kernel_size=(3, 3))
         x = self._add_skip_connection(input_image, y)
         x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
 
-        y = self._conv2d(x, filters=64, kernel_size=(3, 3))
-        y = self._conv2d(y, filters=64, kernel_size=(3, 3))
-        x = self._add_skip_connection(x, y)
-        x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
-
-        y = self._conv2d(x, filters=128, kernel_size=(3, 3))
-        y = self._conv2d(y, filters=128, kernel_size=(3, 3))
-        x = self._add_skip_connection(x, y)
         y = self._conv2d(x, filters=128, kernel_size=(3, 3))
         y = self._conv2d(y, filters=128, kernel_size=(3, 3))
         x = self._add_skip_connection(x, y)
         x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
 
-        # y = self._conv2d(x, filters=512, kernel_size=(3, 3))
-        # y = self._conv2d(y, filters=512, kernel_size=(3, 3))
         y = self._conv2d(x, filters=128, kernel_size=(3, 3))
         y = self._conv2d(y, filters=128, kernel_size=(3, 3))
         x = self._add_skip_connection(x, y)
-        y = self._conv2d(x, filters=128, kernel_size=(3, 3))
-        y = self._conv2d(y, filters=128, kernel_size=(3, 3))
-        x = self._add_skip_connection(x, y)
-        y = self._conv2d(x, filters=256, kernel_size=(3, 3))
-        y = self._conv2d(y, filters=256, kernel_size=(3, 3))
-        x = self._add_skip_connection(x, y)
+        x = tfkl.MaxPooling2D((2, 2), strides=1, padding='same')(x)
 
-        x = self._conv2d(x, filters=64, kernel_size=(3, 3))
+        y = self._conv2d(x, filters=256, kernel_size=(2, 2))
+        y = self._conv2d(y, filters=256, kernel_size=(2, 2))
+        x = self._add_skip_connection(x, y)
         return x
 
     def _conv2d(self, x, filters, kernel_size):
