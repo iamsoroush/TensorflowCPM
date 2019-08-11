@@ -4,6 +4,9 @@ from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+from src.custom_layers import InstanceNorm
+
 from tensorflow import keras as tfk
 tfkl = tfk.layers
 tfkb = tfk.backend
@@ -52,6 +55,12 @@ class KerasModel:
 
 
 class CPM(KerasModel):
+
+    """Convolutional pose machine in tensorflow keras.
+
+    Note: Because of limited GPU ram, batch size will be small, so i replace all BatchNormalization layers
+        with InstanceNorm.
+    """
 
     def __init__(self,
                  input_shape=(None, None, 3),
@@ -224,7 +233,8 @@ class CPM(KerasModel):
 
     def _conv2d(self, x, filters, kernel_size):
         out = tfkl.Conv2D(filters, kernel_size, padding='same')(x)
-        out = tfkl.BatchNormalization()(out)
+        # out = tfkl.BatchNormalization()(out)
+        out = InstanceNorm(mean=0.5, stddev=0.5)(out)
         out = tfkl.Activation('relu')(out)
         out = tfkl.SpatialDropout2D(self.dropout_rate)(out)
         return out
