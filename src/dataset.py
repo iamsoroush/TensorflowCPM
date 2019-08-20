@@ -1,3 +1,5 @@
+import tensorflow as tf
+
 from urllib.request import urlretrieve
 import os
 import tarfile
@@ -12,8 +14,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 import cv2
-
-import tensorflow as tf
 
 
 class MPIIDataset:
@@ -96,25 +96,47 @@ class MPIIDataset:
             with open(self.images_pickle_path, 'rb') as pkl:
                 images = pickle.load(pkl)
         else:
-            print('Generating Image instances from images ...')
+            print('Generating ImageMPII instances from images ...')
             mat = loadmat(self.annotations_path)
-            is_train = mat['RELEASE']['img_train'][0, 0][0]
-            img_idx = np.arange(len(is_train))
-            img_names = [i['name'][0, 0][0] for i in mat['RELEASE']['annolist'][0, 0]['image'][0, :]]
+            release = mat['RELEASE']
+
+            is_train = release['img_train'][0, 0][0]
+            anno_lists = release['annolist'][0, 0][0]
+            activity = release['act'][0, 0][:, 0]
+
+            n_images = len(is_train)
+            img_idx = np.arange(n_images)
 
             images = list()
-            with tqdm(total=len(is_train)) as pbar:
+
+            no_annotations = list()
+
+            with tqdm(total=n_images) as pbar:
                 for ind in img_idx:
-                    img_name = img_names[ind]
-                    anno_rect = mat['RELEASE']['annolist'][0, 0]['annorect'][0][ind][0]
-                    img = ImageMPII(img_ind=ind,
-                                    img_name=img_name,
-                                    is_train=is_train[ind],
-                                    anno_rect=anno_rect,
-                                    images_dir=self.images_dir,
-                                    belief_maps_dir=self.belief_maps_dir)
-                    images.append(img)
+                    img_name = anno_lists['image'][ind]['name'][0, 0][0]
+                    img_anno_rects = anno_lists[ind]['annorect']
+
+                    if np.any(img_anno_rects.size):
+                        anno_rects = img_anno_rects[0]
+
+                        rect_names = anno_rects.dtype.names
+                        if rect_names is not None:
+                            if 'annopoints' in rect_names:
+                                img = ImageMPII(img_ind=ind,
+                                                img_name=img_name,
+                                                is_train=is_train[ind],
+                                                anno_rects=anno_rects,
+                                                activity=activity[ind],
+                                                images_dir=self.images_dir,
+                                                belief_maps_dir=self.belief_maps_dir)
+                                images.append(img)
+                                pbar.update(1)
+                                continue
+                    no_annotations.append(ind)
                     pbar.update(1)
+            print('Annotations does not provided for {}/{} images.'.format(len(no_annotations), n_images))
+            with open(self.images_pickle_path, 'wb') as pkl:
+                pickle.dump(images, pkl)
         self.images = images
         return
 
@@ -253,9 +275,7 @@ class MPIIDataset:
         if (xll >= xlr) or (ylt >= yld):
             return gaussian_map
 
-        gaussian_map[ylt: yld,
-                     xll: xlr] = gaussian[: yld - ylt,
-                                          : xlr - xll]
+        gaussian_map[ylt: yld, xll: xlr] = gaussian[: yld - ylt, : xlr - xll]
         return gaussian_map
 
     def _save_belief_map_as_sparse_tfrecord(self, belief_map, img):
@@ -304,6 +324,173 @@ class MPIIDataset:
 
                 shutil.copyfile(src_path, dst_path)
                 pbar.update(1)
+
+
+class ImageMPII:
+
+    def __init__(self,
+                 img_ind,
+                 img_name,
+                 is_train,
+                 activity,
+                 anno_rects,
+                 images_dir,
+                 belief_maps_dir):
+        self.ind = img_ind
+        self.name = img_name
+        self.path = os.path.join(images_dir, img_name)
+        self.is_train = is_train
+        sh = cv2.imread(self.path).shape
+        self.height = sh[0]
+        self.width = sh[1]
+        self.act_id, self.cat_name, self.act_name = None, None, None
+        if np.any(activity['act_id'].size):
+            self.act_id = activity['act_id'][0, 0]
+        if np.any(activity['act_name'].size):
+            self.act_name = activity['act_name'][0]
+        if np.any(activity['cat_name'].size):
+            self.cat_name = activity['cat_name'][0]
+        self.persons = [Person(person, img_ind, i) for i, person in enumerate(anno_rects)]
+        self.tfrecord_name = img_name.split('.')[0] + '.tfrecord'
+        self.tfrecord_path = os.path.join(belief_maps_dir, self.tfrecord_name)
+
+    def show(self, mode='joints', variance=5):
+        img = cv2.cvtColor(cv2.imread(self.path), cv2.COLOR_BGR2RGB)
+        fig, ax = plt.subplots(nrows=1, ncols=1)
+        ax.imshow(img)
+
+        if mode == 'joints':
+            self._add_joints_to_image(ax, variance)
+        elif mode == 'head':
+            self._add_head_to_image(ax)
+        elif mode == 'persons':
+            self._add_persons_to_image(ax)
+        elif mode == 'all':
+            self._add_joints_to_image(ax)
+            self._add_head_to_image(ax)
+            self._add_persons_to_image(ax)
+        else:
+            raise Exception('Mode must be one of {joints, head, persons}.')
+        plt.show()
+
+    def _add_joints_to_image(self, ax, variance):
+        gaussian = self._make_gaussian(variance)
+        hm = np.zeros((self.height, self.width), dtype=np.float32)
+        for person in self.persons:
+            for joint in person.visible_joints:
+                self._add_gaussian(hm, gaussian, joint.x, joint.y, variance)
+        ax.imshow(hm, alpha=0.6, cmap='viridis')
+
+    def _add_head_to_image(self, ax):
+        for person in self.persons:
+            head = person.head
+            width = np.abs(head.x1 - head.x2)
+            height = np.abs(head.y1 - head.y2)
+            rect = patches.Rectangle((head.x2, head.y2),
+                                     width=width,
+                                     height=height,
+                                     fill=False,
+                                     linewidth=1,
+                                     edgecolor='r',
+                                     facecolor=None)
+            ax.add_patch(rect)
+
+    def _add_persons_to_image(self, ax):
+        for person in self.persons:
+            ax.scatter(person.x, person.y)
+
+
+    @staticmethod
+    def _add_gaussian(heatmap, gaussian, c_x, c_y, variance):
+        img_height, img_width = heatmap.shape
+        ylt = int(max(0, int(c_y) - 4 * variance))
+        yld = int(min(img_height, int(c_y) + 4 * variance))
+        xll = int(max(0, int(c_x) - 4 * variance))
+        xlr = int(min(img_width, int(c_x) + 4 * variance))
+
+        if (xll >= xlr) or (ylt >= yld):
+            return heatmap
+
+        heatmap[ylt: yld, xll: xlr] = gaussian[: yld - ylt, : xlr - xll]
+        return
+
+    @staticmethod
+    def _make_gaussian(variance):
+        size = int(8 * variance)
+        x = np.arange(0, size, 1, np.float32)
+        y = x[:, np.newaxis]
+        x0 = y0 = size // 2
+        return (np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / 2.0 / variance / variance)).astype(np.float32)
+
+
+class Person:
+
+    def __init__(self, person_anno, img_ind, person_ind):
+        self.img_ind = img_ind
+        self.person_ind = person_ind
+
+        fields = list()
+        if person_anno is not None:
+            fields = person_anno.dtype.names
+
+        if 'x1' in fields:
+            self.head = Head(person_anno['x1'][0, 0],
+                             person_anno['y1'][0, 0],
+                             person_anno['x2'][0, 0],
+                             person_anno['y2'][0, 0])
+        else:
+            self.head = Head(None,
+                             None,
+                             None,
+                             None)
+
+        self.scale, self.x, self.y = None, None, None
+
+        if 'scale' in fields:
+            if np.any(person_anno['scale'].size):
+                self.scale = person_anno['scale'][0, 0]
+
+        if 'objpos' in fields:
+            objpos = person_anno['objpos']
+            if np.any(objpos.size):
+                self.x = objpos['x'][0, 0][0, 0]
+                self.y = objpos['y'][0, 0][0, 0]
+
+        self.visible_joints = list()
+        if 'annopoints' in fields:
+            annopoints = person_anno['annopoints']
+            if np.any(annopoints.size):
+                joints = annopoints[0, 0]['point'][0]
+                self.visible_joints = list()
+                for joint in joints:
+                    if isinstance(joint, np.void):
+                        fields = joint.dtype.names
+                        if 'is_visible' in fields:
+                            if np.any(joint['is_visible'].astype(np.int8)):
+                                self.visible_joints.append(Joint(joint))
+
+
+class Head:
+
+    def __init__(self, x1, y1, x2, y2):
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
+
+
+class Joint:
+    joint_names = ['r ankle', 'r knee', 'r hip', 'l hip', 'l knee',
+                   'l ankle', 'pelvis', 'thorax', 'upper neck',
+                   'head top', 'r wrist', 'r elbow', 'r shoulder',
+                   'l shoulder', 'l elbow', 'l wrist']
+    mapping_dict = dict(zip(range(len(joint_names)), joint_names))
+
+    def __init__(self, joint):
+        self.index = joint['id'][0, 0]
+        self.name = Joint.mapping_dict[self.index]
+        self.x = joint['x'][0, 0]
+        self.y = joint['y'][0, 0]
 
 
 def create_tf_dataset(img_paths, tfrecord_paths, target_img_size, batch_size):
@@ -369,138 +556,3 @@ def _load_data(img_path, tfr, target_size):
     img = _load_and_preprocess_image(img_path, target_size)
     belief_maps = _parse_bm(tfr, target_size)
     return img, belief_maps
-
-
-class ImageMPII:
-
-    def __init__(self,
-                 img_ind,
-                 img_name,
-                 is_train,
-                 anno_rect,
-                 images_dir,
-                 belief_maps_dir):
-        self.ind = img_ind
-        self.name = img_name
-        self.path = os.path.join(images_dir, img_name)
-        self.is_train = is_train
-        sh = cv2.imread(self.path).shape
-        self.height = sh[0]
-        self.width = sh[1]
-        self.persons = [Person(p, img_ind, i) for i, p in enumerate(anno_rect)]
-        self.tfrecord_name = img_name.split('.')[0] + '.tfrecord'
-        self.tfrecord_path = os.path.join(belief_maps_dir, self.tfrecord_name)
-
-    def show(self, mode='joints', variance=5):
-        img = cv2.cvtColor(cv2.imread(self.path), cv2.COLOR_BGR2RGB)
-        fig, ax = plt.subplots(nrows=1, ncols=1)
-        ax.imshow(img)
-
-        if mode == 'joints':
-            gaussian = self._make_gaussian(variance)
-            hm = np.zeros((self.height, self.width), dtype=np.float32)
-            for person in self.persons:
-                for joint in person.visible_joints:
-                    self._add_gaussian(hm, gaussian, joint.x, joint.y, variance)
-            ax.imshow(hm, alpha=0.6, cmap='viridis')
-        elif mode == 'head':
-            for person in self.persons:
-                head = person.head
-                width = np.abs(head.x1 - head.x2)
-                height = np.abs(head.y1 - head.y2)
-                rect = patches.Rectangle((head.x1, head.y1),
-                                         width=width,
-                                         height=height,
-                                         fill=False,
-                                         linewidth=1,
-                                         edgecolor='r',
-                                         facecolor=None)
-                ax.add_patch(rect)
-        elif mode == 'persons':
-            for person in self.persons:
-                ax.scatter(person.x, person.y)
-        else:
-            raise Exception('Mode must be one of {joints, head, persons}.')
-        plt.show()
-
-    @staticmethod
-    def _add_gaussian(heatmap, gaussian, c_x, c_y, variance):
-        img_height, img_width = heatmap.shape
-        ylt = int(max(0, int(c_y) - 4 * variance))
-        yld = int(min(img_height, int(c_y) + 4 * variance))
-        xll = int(max(0, int(c_x) - 4 * variance))
-        xlr = int(min(img_width, int(c_x) + 4 * variance))
-
-        if (xll >= xlr) or (ylt >= yld):
-            return heatmap
-
-        heatmap[ylt: yld,
-                xll: xlr] = gaussian[: yld - ylt,
-                                     : xlr - xll]
-        return
-
-    @staticmethod
-    def _make_gaussian(variance):
-        size = int(8 * variance)
-        x = np.arange(0, size, 1, np.float32)
-        y = x[:, np.newaxis]
-        x0 = y0 = size // 2
-        return (np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / 2.0 / variance / variance)).astype(np.float32)
-
-
-class Person:
-
-    def __init__(self, person_anno, img_ind, person_ind):
-        self.img_ind = img_ind
-        self.person_ind = person_ind
-
-        fields = person_anno.dtype.names
-
-        if 'x1' in fields:
-            self.head = Head(person_anno['x1'][0, 0],
-                             person_anno['y1'][0, 0],
-                             person_anno['x2'][0, 0],
-                             person_anno['y2'][0, 0])
-        else:
-            self.head = Head(None,
-                             None,
-                             None,
-                             None)
-        if 'scale' in fields:
-            self.scale = person_anno['scale'][0, 0]
-        else:
-            self.scale = None
-        if 'objpos' in fields:
-            self.x = person_anno['objpos'][0, 0][0][0][0]
-            self.y = person_anno['objpos'][0, 0][1][0][0]
-        else:
-            self.x = None
-            self.y = None
-        if 'annopoints' in fields:
-            joints = person_anno['annopoints'][0]['point'][0][0]
-            self.visible_joints = [Joint(joint) for joint in joints if np.any(joint[3])]
-        else:
-            self.visible_joints = list()
-
-
-class Head:
-
-    def __init__(self, x1, y1, x2, y2):
-        self.x1 = x1
-        self.y1 = y1
-        self.x2 = x2
-        self.y2 = y2
-
-
-class Joint:
-    joint_names = ['r ankle', 'r knee', 'r hip', 'l hip', 'l knee',
-                   'l ankle', 'pelvis', 'thorax', 'upper neck',
-                   'head top', 'r wrist', 'r elbow', 'r shoulder',
-                   'l shoulder', 'l elbow', 'l wrist']
-    mapping_dict = dict(zip(range(len(joint_names)), joint_names))
-
-    def __init__(self, joint):
-        self.index = joint[2][0, 0]
-        self.name = Joint.mapping_dict[self.index]
-        self.x = joint[0][0, 0]
-        self.y = joint[1][0, 0]
